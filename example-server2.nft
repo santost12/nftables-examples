@@ -1,0 +1,32 @@
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+        chain input {
+                type filter hook input priority 0; policy drop;
+                ct state invalid counter drop comment "early drop of invalid packets"
+                ct state {established, related} counter accept comment "accept all connections related to connections made by us"
+                meta l4proto icmp icmp type echo-request limit rate over 10/second burst 4 packets drop comment "No ping floods"
+                meta l4proto ipv6-icmp icmpv6 type echo-request limit rate over 10/second burst 4 packets drop comment "No ping floods"
+                iif lo accept comment "accept loopback"
+                iif != lo ip daddr 127.0.0.1/8 counter drop comment "drop connections to loopback not coming from loopback"
+                iif != lo ip6 daddr ::1/128 counter drop comment "drop connections to loopback not coming from loopback"
+                ip protocol icmp counter accept comment "accept all ICMP types"
+                ip6 nexthdr icmpv6 counter accept comment "accept all ICMP types"
+
+                # SSH
+                tcp dport 22 accept
+                
+                # webserver
+                tcp dport {80,443} accept
+        }
+
+        chain forward {
+                type filter hook forward priority 0; policy drop;
+        }
+
+        chain output {
+                type filter hook output priority 0; policy accept;
+        }
+}

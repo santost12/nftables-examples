@@ -1,0 +1,71 @@
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+        chain input {
+                type filter hook input priority 0; policy drop;
+                ct state invalid counter drop comment "early drop of invalid packets"
+                ct state {established, related} counter accept comment "accept all connections related to connections made by us"
+                meta l4proto icmp icmp type echo-request limit rate over 10/second burst 4 packets drop comment "No ping floods"
+                meta l4proto ipv6-icmp icmpv6 type echo-request limit rate over 10/second burst 4 packets drop comment "No ping floods"
+                iif lo accept comment "accept loopback"
+                iif != lo ip daddr 127.0.0.1/8 counter drop comment "drop connections to loopback not coming from loopback"
+                iif != lo ip6 daddr ::1/128 counter drop comment "drop connections to loopback not coming from loopback"
+                ip protocol icmp counter accept comment "accept all ICMP types"
+                ip6 nexthdr icmpv6 counter accept comment "accept all ICMP types"
+
+                # FTP
+                tcp dport {20,21} accept
+                tcp dport {5100-5200} accept
+
+                # SSH
+                tcp dport 22 accept
+
+                # openvpn
+                tcp dport 1194 accept
+                tcp dport 443 accept
+
+                # nginx qbittorrent webUI
+                tcp dport 8080 accept
+
+                # qbittorrent (running on the server)
+                tcp dport 9873 accept
+                udp dport 9873 accept
+        }
+
+        chain forward {
+                type filter hook forward priority 0; policy accept;
+
+        }
+
+        chain prerouting {
+                type nat hook prerouting priority -101; policy accept;
+
+                # port redirect
+                ip daddr 1.2.3.4 tcp dport 443 redirect to 1194
+
+                # port forwarding (Example 1)
+                ip saddr 0.0.0.0/0 ip daddr 1.2.3.4 tcp dport 9864 dnat to 10.8.0.2:9864
+                ip saddr 0.0.0.0/0 ip daddr 1.2.3.4 udp dport 9864 dnat to 10.8.0.2:9864
+                ip6 saddr ::/0 ip6 daddr 2001:db8:123:abcd::4321 tcp dport 9864 dnat to [fd42:42:42:42::2]:9864
+                ip6 saddr ::/0 ip6 daddr 2001:db8:123:abcd::4321 udp dport 9864 dnat to [fd42:42:42:42::2]:9864
+
+                # port forwarding (Example 2)
+                ip saddr 0.0.0.0/0 ip daddr 1.2.3.4 udp dport 9865 dnat to 10.8.0.2:9865
+                ip6 saddr ::/0 ip6 daddr 2001:db8:123:abcd::4321 udp dport 9865 dnat to [fd42:42:42:42::2]:9865
+        }
+
+        chain postrouting {
+                type nat hook postrouting priority 101; policy accept;
+
+                # openvpn NAT
+                ip saddr 10.8.0.0/24 oif eth0 snat to 1.2.3.4 random
+                ip6 saddr fd42:42:42:42::/112 oif eth0 snat to 2001:db8:123:abcd::4321 random
+        }
+
+        chain output {
+                type filter hook output priority 0; policy accept;
+
+        }
+}
